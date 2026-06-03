@@ -1,0 +1,1 @@
+Timestamp,FPS_Monitor,CPU_Usage_Total%,GPU_Usage%,RAM_Usage_GB,RAM_Total_GB,SWAP_Usage_GB,Power_Total_mW,Power_GPU_mW,Power_CPU_mW,Temp_GPU_C,Temp_CPU_C,Fan_Speed%

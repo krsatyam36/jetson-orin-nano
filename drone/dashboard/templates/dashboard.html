@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scout Drone Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { background: #0b0e14; color: #00ffcc; font-family: 'Courier New', monospace; margin: 0; }
+        #dashboard { display: grid; grid-template-columns: 1fr 2fr 1fr; height: 100vh; padding: 20px; box-sizing: border-box; }
+        .motor-box { border: 1px solid #00ffcc; padding: 15px; background: rgba(0, 255, 204, 0.05); border-radius: 8px; margin-bottom: 10px; }
+        .center-drone { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        .data-val { font-size: 1.2em; font-weight: bold; color: #fff; }
+        .warning { color: #ff3333; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+        svg { width: 300px; filter: drop-shadow(0 0 10px #00ffcc); margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div id="dashboard">
+        <div style="display: flex; flex-direction: column; justify-content: space-around;">
+            <div class="motor-box" id="m3"><h3>MOTOR 3 (FL)</h3><div class="stats"></div></div>
+            <div class="motor-box" id="m2"><h3>MOTOR 2 (BL)</h3><div class="stats"></div></div>
+        </div>
+
+        <div class="center-drone">
+            <h2>PIXHAWK 6C - STATUS: ACTIVE</h2>
+            <svg viewBox="0 0 100 100">
+                <line x1="20" y1="20" x2="80" y2="80" stroke="#00ffcc" stroke-width="2" />
+                <line x1="80" y1="20" x2="20" y2="80" stroke="#00ffcc" stroke-width="2" />
+                <rect x="35" y="35" width="30" height="30" fill="#0b0e14" stroke="#00ffcc" />
+                <circle cx="20" cy="20" r="5" fill="#00ffcc" id="circle-3"/>
+                <circle cx="80" cy="20" r="5" fill="#00ffcc" id="circle-1"/>
+                <circle cx="20" cy="80" r="5" fill="#00ffcc" id="circle-2"/>
+                <circle cx="80" cy="80" r="5" fill="#00ffcc" id="circle-4"/>
+            </svg>
+            <p>BATT: <span id="master-volt" class="data-val">--</span>V</p>
+        </div>
+
+        <div style="display: flex; flex-direction: column; justify-content: space-around;">
+            <div class="motor-box" id="m1"><h3>MOTOR 1 (FR)</h3><div class="stats"></div></div>
+            <div class="motor-box" id="m4"><h3>MOTOR 4 (BR)</h3><div class="stats"></div></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        socket.on('telemetry_update', function(data) {
+            data.forEach(motor => {
+                const box = document.querySelector(`#m${motor.id} .stats`);
+                const isOverload = motor.current > 17;
+                document.getElementById(`circle-${motor.id}`).setAttribute('fill', isOverload ? '#ff3333' : '#00ffcc');
+                
+                box.innerHTML = `
+                    <p>RPM: <span class="data-val">${motor.rpm}</span></p>
+                    <p>THRUST: <span class="data-val">${motor.thrust}g</span></p>
+                    <p>CURR: <span class="data-val ${isOverload ? 'warning' : ''}">${motor.current}A</span></p>
+                    <p>DIR: ${motor.direction}</p>
+                `;
+                if(motor.id === 1) document.getElementById('master-volt').innerText = motor.voltage;
+            });
+        });
+    </script>
+</body>
+</html>

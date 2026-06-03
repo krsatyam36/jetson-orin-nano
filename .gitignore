@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.swp
+*.swo
+
+# Model files (too large for git — use scripts/download_models.sh)
+models/*.pt
+models/*.engine
+models/*.onnx
+!models/.gitkeep
+
+# Logs & telemetry data (session-specific, can be large)
+logs/
+*.tlog
+*.tlog.raw
+*.parm
+*.mavlog
+
+# Binaries
+*.deb
+*.whl
+*.tar.gz
+*.zip
+
+# IDE / editor config
+.vscode/
+.idea/
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Shell / environment
+.bash_history
+.zsh_history
+.env
+*.env.local
+
+# MAVProxy cache
+.mavproxy/

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "jetson-drone-project"
+version = "0.1.0"
+description = "AI-powered autonomous drone system for NVIDIA Jetson Orin with Pixhawk 6C"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = [
+    "opencv-python>=4.8.0",
+    "ultralytics>=8.0.0",
+    "flask>=2.3.0",
+    "flask-socketio>=5.3.0",
+    "eventlet>=0.33.0",
+    "pymavlink>=2.4.0",
+    "pyserial>=3.5",
+]
+
+[project.urls]
+Repository = "https://github.com/krsatyam36/jetson-orin-nano"
