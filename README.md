@@ -724,6 +724,54 @@ python drone/corridor_scout.py --no-vision --alt 10 --length 50 --width 20
 
 ---
 
+## Project Tree
+
+```
+.
+├── config/
+│   ├── corridor.yaml          # Corridor scout mission config
+│   └── mavros.yaml            # MAVROS ROS 2 config
+├── data/performance/          # Jetson stats CSV logs
+├── drone/
+│   ├── controller.py          # Flight controller abstraction
+│   ├── corridor_scout.py      # Autonomous corridor mission
+│   ├── dashboard/
+│   │   ├── app.py             # Flask dashboard
+│   │   ├── launch.sh          # Dashboard launcher
+│   │   └── templates/
+│   │       └── dashboard.html # Dashboard template
+│   ├── follow.py              # Person-follow mode
+│   ├── health.py              # Health endpoint
+│   └── telemetry.py           # MAVLink telemetry dump
+├── models/                    # YOLO models (gitignored)
+├── scripts/
+│   ├── download_models.sh     # Model downloader
+│   └── tlog_parser.py         # MAVLink log parser
+├── tests/
+│   ├── conftest.py            # Pytest fixtures / mocks
+│   ├── test_controller.py     # Controller unit tests
+│   ├── test_detector.py       # Detector unit tests
+│   └── test_health.py         # Health endpoint tests
+├── vision/
+│   ├── camera_test.py         # Serial camera test
+│   ├── csi_stream.py          # CSI camera stream
+│   ├── detector.py            # Shared YOLO inference engine
+│   ├── samples/               # Sample images
+│   ├── usb_stream.py          # USB + YOLO stream
+│   └── usb_tracker.py         # USB + YOLO + tracking
+├── .github/workflows/
+│   └── ci.yml                 # CI pipeline
+├── .pre-commit-config.yaml    # Pre-commit hooks
+├── Dockerfile                 # Container build
+├── Makefile                   # Command reference
+├── pyproject.toml             # Python project config
+├── README.md                  # This file
+├── requirements.txt           # Python dependencies
+└── LICENSE                    # MIT license
+```
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
