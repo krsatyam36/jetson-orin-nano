@@ -43,3 +43,11 @@ Thumbs.db
 
 # MAVProxy cache
 .mavproxy/
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml
+
+# Docker
+.dockerignore

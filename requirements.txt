@@ -1,6 +1,7 @@
 # Core vision
 opencv-python>=4.8.0
 ultralytics>=8.0.0
+numpy>=1.24.0
 
 # Web streaming
 flask>=2.3.0
@@ -12,3 +13,14 @@ pymavlink>=2.4.0
 
 # Serial
 pyserial>=3.5
+
+# Configuration
+pyyaml>=6.0
+
+# Testing & quality (dev)
+pytest>=7.0
+pytest-cov>=4.0
+flake8>=7.0
+black>=24.0
+mypy>=1.8
+pre-commit>=3.6

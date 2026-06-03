@@ -1,0 +1,21 @@
+# Corridor scout mission parameters
+# Edit this file or override via CLI flags:
+#   python drone/corridor_scout.py --alt 20 --length 150
+
+flight_altitude: 15.24      # metres (50 ft)
+corridor_length: 100.0      # metres
+corridor_width: 40.0        # metres
+lane_spacing: 10.0          # metres
+detector_conf: 0.4          # YOLO confidence threshold
+video_port: 8000            # MJPEG stream port
+health_port: 9090           # Health endpoint port
+
+# Geofence (0 = disabled)
+geofence:
+  max_alt_offset: 20.0      # metres above flight_altitude
+  max_radius: 500.0         # metres from home
+
+# Watchdog
+watchdog:
+  timeout_seconds: 5.0
+  fail_action: "RTL"        # RTL | LAND | HOVER | DISARM

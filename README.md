@@ -2,7 +2,7 @@
 
 # Jetson Orin Nano — Autonomous Drone & Vision System
 
-**v0.1.0** — *AI-powered autonomous drone platform with Pixhawk 6C, YOLOv8 computer vision, and real-time MAVLink telemetry*
+**v0.2.0** — *AI-powered autonomous drone platform with Pixhawk 6C, YOLOv8 computer vision, and real-time MAVLink telemetry*
 
 [![Python](https://img.shields.io/badge/Python-3.8+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-00FFFF?style=flat&logo=ultralytics&logoColor=white)](https://ultralytics.com)
@@ -56,9 +56,12 @@ The system runs entirely from the terminal with `make` commands. No GUI, no IDE,
 **What you can do with it:**
 
 - Stream CSI or USB camera feeds to any browser on the network
-- Track people in real time with YOLOv8 + ByteTrack (instant lock or 60-second timer)
-- Read live Pixhawk telemetry (attitude, GPS, battery, heading)
-- Run an autonomous corridor-scout mission with waypoint navigation
+- Track people in real time with YOLOv8 + ByteTrack (PyTorch or TensorRT backend)
+- Use two lock strategies — instant permanent lock or 60-second observation timer
+- Read live Pixhawk telemetry (attitude, GPS, battery, heading) via a shared DroneController
+- Run an autonomous corridor-scout mission with automated takeoff, waypoint navigation, and RTL
+- Follow a person autonomously with vision-based steering
+- Access a health endpoint (`/health`) exposing full drone state as JSON
 - View a simulated drone dashboard with real-time motor telemetry
 
 ---
@@ -66,13 +69,17 @@ The system runs entirely from the terminal with `make` commands. No GUI, no IDE,
 ## Features
 
 - **Dual Camera Support** — CSI camera (GStreamer) and USB camera (UVC) with automatic fallback
-- **YOLOv8 Object Tracking** — ByteTrack-based person tracking with configurable lock behavior
+- **Shared Detection Engine** — `vision/detector.py` wraps YOLO with auto backend select (PyTorch `.pt`, TensorRT `.engine`, ONNX `.onnx`)
 - **Two Lock Strategies** — Instant permanent lock (`usb_stream.py`) or 60-second observation timer (`usb_tracker.py`)
 - **Live MAVLink Telemetry** — ATTITUDE, VFR_HUD, and GPS_RAW_INT messages streamed to terminal
-- **Autonomous Corridor Mission** — Zigzag lawnmower pattern with OSD-overlaid video feed
+- **Drone Flight Controller** — `drone/controller.py` handles arm, takeoff, land, RTL, geofence, watchdog, pre-arm checklist
+- **Autonomous Corridor Mission** — Zigzag lawnmower pattern with automated takeoff, OSD video, and RTL on completion
+- **Person-Follow Mode** — Vision-based target tracking with closed-loop steering via DroneController
+- **Health Endpoint** — `/health` JSON endpoint exposing GPS, battery, attitude, pre-arm status
 - **Simulated Dashboard** — Web-based drone telemetry UI with real-time WebSocket updates (no hardware needed)
+- **MAVLink Log Parser** — Parse `.tlog` files and export to CSV
 - **Makefile-Driven** — Every operation is a single `make <command>` away
-- **Production-Grade Repo** — `.gitignore` blocks models/binaries/logs, `pyproject.toml` for pip install, no secrets committed
+- **Production-Grade Repo** — `.gitignore`, `pyproject.toml`, `pre-commit` hooks, CI pipeline, Dockerfile, pytest suite
 
 ---
 
@@ -176,6 +183,7 @@ jetson-orin-nano/
 ├── .gitignore                Blocks models/, logs/, binaries, IDE files
 │
 ├── vision/                   Camera & YOLO streaming tools
+│   ├── detector.py           Shared detection engine (PyTorch / TensorRT / ONNX backend)
 │   ├── csi_stream.py         CSI camera → MJPEG stream (no AI, GStreamer)
 │   ├── usb_stream.py         USB camera + YOLO → instant permanent lock
 │   ├── usb_tracker.py        USB camera + YOLO → 60-second observation lock
@@ -183,8 +191,11 @@ jetson-orin-nano/
 │   └── samples/              Sample captured frames
 │
 ├── drone/                    Drone autonomy system
-│   ├── telemetry.py          Live MAVLink telemetry readout
-│   ├── corridor_scout.py     Autonomous zigzag corridor mission + video OSD
+│   ├── controller.py         Flight controller abstraction (arm, takeoff, land, RTL, geofence, watchdog, pre-arm)
+│   ├── telemetry.py          Live MAVLink telemetry readout (wraps controller.py)
+│   ├── corridor_scout.py     Autonomous zigzag corridor mission + automated takeoff + RTL
+│   ├── follow.py             Person-follow mode (vision-based target tracking + steering)
+│   ├── health.py             HTTP health endpoint (/health → full drone state as JSON)
 │   └── dashboard/            Simulated real-time telemetry dashboard
 │       ├── app.py            Flask-SocketIO backend
 │       ├── launch.sh         Kiosk boot script
@@ -192,14 +203,20 @@ jetson-orin-nano/
 │
 ├── models/                   YOLO weights (gitignored — run download_models.sh)
 ├── scripts/                  Utility scripts
-│   └── download_models.sh    Fetches YOLO .pt files from Ultralytics
-├── config/                   Reference configuration
-│   └── mavros.yaml           MAVROS config for Pixhawk 6C
+│   ├── download_models.sh    Fetches YOLO .pt files from Ultralytics
+│   └── tlog_parser.py        Parse MAVLink .tlog files and export to CSV
+├── config/                   Configuration files
+│   ├── mavros.yaml           MAVROS config for Pixhawk 6C
+│   └── corridor.yaml         Corridor mission parameters
+├── tests/                    Pytest suite
+│   ├── test_detector.py
+│   ├── test_controller.py
+│   └── test_health.py
 ├── logs/                     Flight telemetry logs (gitignored)
-│   ├── mav.tlog / .raw       MAVLink telemetry log
-│   └── nidarhex/             NidarHex flight data
-└── data/                     Performance monitoring
-    └── performance/          jetson_stats GPU/CPU/temp/power CSVs
+├── data/                     Performance monitoring
+├── .github/workflows/ci.yml  GitHub Actions CI pipeline
+├── .pre-commit-config.yaml   Pre-commit hooks (black, flake8, mypy, secrets scan)
+├── Dockerfile                Container image for health endpoint
 ```
 
 ---
@@ -260,6 +277,14 @@ make dashboard
 # Option D — USB camera + YOLO instant person lock
 make stream-usb
 # → Open http://<jetson-ip>:5000
+
+# Option E — Full autonomous corridor mission (Pixhawk required)
+make scout
+# → Video on :8000, health on :9090
+
+# Option F — Person follow mode
+make follow
+# → Video on :5001
 ```
 
 ---
@@ -286,10 +311,13 @@ make camera-test             # terminal only
 
 ```bash
 # Live Pixhawk readout (verify link before any mission)
-make telemetry               # terminal only
+make telemetry               # terminal only, health on :9090
 
-# Autonomous corridor scout mission (requires Pixhawk + GPS + GUIDED mode)
-make scout                   # video on :8000
+# Full autonomous corridor scout mission (arm + GUIDED + >3m alt required)
+make scout                   # video on :8000, health on :9090
+
+# Person-follow mode — tracks and steers toward a person
+make follow                  # video on :5001
 ```
 
 ### Telemetry Dashboard
@@ -306,21 +334,60 @@ make dashboard               # port :5000, auto-opens browser
 | Command | Action | Port | Hardware Needed |
 |---------|--------|------|-----------------|
 | `make install` | Install Python deps | — | — |
+| `make install-dev` | Install + pre-commit hooks | — | — |
 | `make download-models` | Download YOLO .pt files | — | Internet |
 | `make stream-csi` | CSI camera → MJPEG stream | `:5000` | CSI camera |
 | `make stream-usb` | USB camera + YOLO instant lock | `:5000` | USB camera |
 | `make stream-track` | USB camera + YOLO 60s timer | `:5000` | USB camera |
 | `make camera-test` | Serial camera raw dump | — | Camera on `/dev/ttyACM0` |
-| `make telemetry` | Live Pixhawk MAVLink readout | — | Pixhawk 6C |
-| `make scout` | Autonomous corridor mission | `:8000` | Pixhawk + GPS + USB cam |
+| `make telemetry` | Live Pixhawk MAVLink readout | `:9090` health | Pixhawk 6C |
+| `make scout` | Autonomous corridor mission | `:8000` video, `:9090` health | Pixhawk + GPS + USB cam |
+| `make scout-custom` | Scout with custom params | `:8000` + `:9090` | Pixhawk + GPS + USB cam |
+| `make follow` | Person-follow mode | `:5001` video | Pixhawk + USB cam |
 | `make dashboard` | Simulated telemetry dashboard | `:5000` | None |
+| `make health` | Standalone health endpoint | `:9090` | Pixhawk (optional) |
+| `make tlog-parse FILE=logs/mav.tlog` | Parse MAVLink log | — | — |
+| `make tlog-csv FILE=logs/mav.tlog OUT=out.csv` | Export MAVLink log to CSV | — | — |
+| `make test` | Run pytest suite | — | — |
+| `make lint` | Run flake8 | — | — |
+| `make format` | Auto-format with black | — | — |
+| `make pre-commit` | Run pre-commit hooks | — | — |
+| `make docker-build` | Build Docker image | — | — |
+| `make docker-run` | Run health endpoint in Docker | `:9090` | — |
 | `make clean` | Remove `__pycache__` | — | — |
 
 ---
 
 ## Vision Module
 
-### csi_stream.py
+### `detector.py` — Shared Detection Engine
+
+The shared inference wrapper used by all vision scripts. Automatically selects the backend based on model file extension:
+
+| Extension | Backend | Speed |
+|-----------|---------|-------|
+| `.pt` | PyTorch (via Ultralytics) | Baseline |
+| `.engine` | TensorRT (via Ultralytics + TensorRT) | Fastest on Jetson |
+| `.onnx` | ONNX Runtime (via Ultralytics) | Faster than PT |
+
+```python
+from vision.detector import Detector, draw_detections
+
+det = Detector("models/yolov8n.pt", conf_threshold=0.4)
+
+# Single-frame detection
+results = det.detect(frame)
+
+# Cross-frame tracking (ByteTrack)
+results = det.track(frame, persist=True)
+
+# Draw bounding boxes
+draw_detections(frame, results)
+```
+
+Backend selection is automatic — just point to the right file extension.
+
+### `csi_stream.py`
 
 Captures video from a **Jetson CSI camera** (IMX219) using a GStreamer pipeline in a background thread and serves it as an MJPEG stream via Flask. No AI inference — pure camera feed.
 
@@ -368,7 +435,36 @@ Opens `/dev/ttyACM0` at 115200 baud and dumps raw serial data to the terminal. U
 
 ## Drone Module
 
-### telemetry.py
+### `controller.py` — Flight Controller Abstraction
+
+Wraps pymavlink with a clean state-machine API. Used by `telemetry.py`, `corridor_scout.py`, and `follow.py`.
+
+| Feature | Detail |
+|---------|--------|
+| **Connection** | Auto-detects Pixhawk on `/dev/ttyACM*` or connects to specific port |
+| **Pre-arm Checklist** | GPS 3D fix, ≥8 satellites, battery ≥14V, heartbeat OK, EKF healthy, mode GUIDED |
+| **Arm / Disarm** | `ctrl.arm()` / `ctrl.disarm()` |
+| **Takeoff** | `ctrl.takeoff(alt_m)` — blocks until altitude reached (30s timeout) |
+| **Land** | `ctrl.land()` — blocks until on ground (60s timeout) |
+| **RTL** | `ctrl.rtl()` — return to launch |
+| **Fly To** | `ctrl.fly_to(lat, lon, alt)` — `SET_POSITION_TARGET_GLOBAL_INT` |
+| **Set Mode** | `ctrl.set_mode("GUIDED")` |
+| **Geofence** | Background thread enforces max altitude + max radius — triggers RTL on breach |
+| **Watchdog** | Background thread — if heartbeat lost for N seconds, triggers configurable fail action |
+| **State** | `ctrl.state()` returns thread-safe `DroneState` snapshot (GPS, attitude, battery, EKF, mode, armed) |
+
+```python
+from drone.controller import DroneController
+ctrl = DroneController()
+ctrl.connect()
+ctrl.pre_arm_check()   # returns [] if all good
+ctrl.arm()
+ctrl.takeoff(15.24)
+ctrl.fly_to(lat, lon, 15.24)
+ctrl.rtl()
+```
+
+### `telemetry.py`
 
 Connects to **Pixhawk 6C** over MAVLink and streams three message types to the terminal:
 
@@ -388,34 +484,48 @@ Connects to **Pixhawk 6C** over MAVLink and streams three message types to the t
 
 ### corridor_scout.py
 
-Full **autonomous corridor reconnaissance mission**. Generates a zigzag (lawnmower) path, navigates waypoints via MAVLink `SET_POSITION_TARGET_GLOBAL_INT`, and serves a live OSD-overlaid camera feed on `:8000`.
+Autonomous corridor mission using `DroneController` and `Detector`. Runs pre-arm check, arms, takes off, navigates zigzag path, and RTL on completion.
 
 | Property | Detail |
 |----------|--------|
-| **Prerequisites** | Pixhawk connected, GPS 3D fix, GUIDED mode, armed, airborne >3m |
-| **Flight Altitude** | 50 ft ≈ 15.24 m (`FLIGHT_ALTITUDE`) |
-| **Corridor** | 100m length × 40m width, 10m lane spacing (configurable) |
-| **Navigation** | `fly_to()` every 0.5s — waypoint reached within 3m radius |
-| **Video** | HTTP MJPEG server on `:8000` with OSD overlay |
-| **Camera** | Auto-detects USB camera (`/dev/video0`–`/dev/video3`) |
-| **Audio** | `espeak` voice announcements |
-| **Run** | `make scout` |
+| **Prerequisites** | Pixhawk, GPS 3D fix, GUIDED mode, armed |
+| **New in v0.2** | Auto takeoff, pre-arm, geofence, watchdog, health endpoint, CLI args |
+| **Flight Altitude** | 50 ft / 15.24 m (`--alt N`) |
+| **Corridor** | 100m × 40m, 10m lanes (`--length`, `--width`, `--lane`) |
+| **Navigation** | `fly_to()` every 0.5s, 3m acceptance radius |
+| **Video** | HTTP MJPEG on `:8000` with YOLO overlay + OSD |
+| **Health** | `/health` on `:9090` |
+| **Audio** | `espeak` voice |
+| **Run** | `make scout` / `make scout-custom` |
 
-**Mission Sequence:**
+**Mission Sequence:** Detector init → Connect + geofence + watchdog + health → GPS → Waypoints → Pre-arm → Arm → Takeoff → Navigate → RTL
 
-```
-1. mavlink_loop() thread → auto-detect Pixhawk on /dev/ttyACM*
-2. Video server → HTTP MJPEG on :8000
-3. Wait for GPS lock (current_lat != 0)
-4. Generate zigzag waypoints relative to takeoff point
-5. Initialize USB camera
-6. Main loop:
-   a. Read camera frame → draw OSD → serve via MJPEG
-   b. Check altitude > 3m → mission_started = True
-   c. fly_to() current waypoint (re-sent every 0.5s)
-   d. Within 3m of target → advance to next waypoint
-   e. All waypoints complete → hover + "Scan Complete"
-```
+### `follow.py` — Person-Follow Mode
+
+Tracks a person using the vision Detector and steers the drone via DroneController.
+
+| Property | Detail |
+|----------|--------|
+| **State Machine** | `SEEKING` → `FOLLOWING` → `LOST` → `SEEKING` |
+| **Selection** | Auto-selects highest-confidence person in frame |
+| **Steering** | Proportional control from target offset to frame center |
+| **Timeout** | `FOLLOWING` → `LOST` after 5s without target |
+| **Re-acquisition** | Any person re-entering view resumes following |
+| **Video** | MJPEG on `:5001` with follow-mode OSD |
+| **Run** | `make follow` |
+| **Hardware** | Pixhawk + USB camera |
+
+### `health.py` — Health Endpoint
+
+Full drone state as JSON over HTTP.
+
+| Property | Detail |
+|----------|--------|
+| **GET /health/ping** | Liveness probe → `pong` |
+| **GET /health** | GPS, attitude, speed, battery, pre-arm, EKF, mode |
+| **Port** | `:9090` — standalone or embedded |
+| **Architecture** | Flask Blueprint — mountable on any Flask app |
+| **Run** | `make health` |
 
 ---
 
@@ -425,7 +535,11 @@ Full **autonomous corridor reconnaissance mission**. Generates a zigzag (lawnmow
 
 MAVROS configuration reference for connecting ROS 2 to Pixhawk 6C. Contains serial port, baud rate, frame IDs, and telemetry streaming rates.
 
-> **Note**: ROS 2 + MAVROS integration is not yet wired into the Python scripts. This file serves as setup documentation for future ROS 2 expansion.
+> ROS 2 + MAVROS integration is not yet wired into the Python scripts. This file serves as setup documentation.
+
+### config/corridor.yaml
+
+Corridor scout mission parameters — flight altitude, corridor dimensions, detection confidence, geofence limits, watchdog settings. All values can be overridden via CLI flags (`--alt`, `--length`, etc.).
 
 ---
 
@@ -435,7 +549,7 @@ All models go in `models/`. They are **gitignored** — you must download them a
 
 | File | Size | Used By |
 |------|------|---------|
-| `yolov8n.pt` | ≈6 MB | `usb_stream.py`, `usb_tracker.py`, `corridor_scout.py` |
+| `yolov8n.pt` | ≈6 MB | `detector.py` → `usb_stream.py`, `usb_tracker.py`, `corridor_scout.py`, `follow.py` |
 | `yolov8s.pt` | ≈22 MB | Optional — higher accuracy, slower inference |
 | `yolov8m.pt` | ≈52 MB | Optional — medium variant |
 | `yolo11n.pt` | ≈6 MB | Optional — newer YOLO11 architecture |
@@ -467,9 +581,10 @@ yolo export model=models/yolov8n.pt format=engine device=0
 7. **Port enumeration** — Pixhawk may appear as `/dev/ttyACM0` or `/dev/ttyACM1`. Check with `ls /dev/ttyACM*`.
 8. **Baud rate** — Pixhawk 6C typically uses 115200 (telemetry) or 57600. `telemetry.py` uses 115200; `corridor_scout.py` auto-detects at 57600.
 9. **Heartbeat failure** — If `wait_heartbeat()` times out: check the USB cable, reboot the Pixhawk, verify the port.
-10. **GUIDED mode required** — `corridor_scout.py` needs the FC in GUIDED mode. Set via RC transmitter or QGroundControl.
-11. **Arm manually** — The script does not arm the drone. Arm via RC or GCS before takeoff.
-12. **Takeoff detection** — The mission starts automatically when altitude >3m. You must manually take off to at least 3m.
+10. **GUIDED mode** — All scripts set GUIDED automatically via `DroneController.set_mode()`.
+11. **Auto-arm** — `corridor_scout.py` runs a pre-arm checklist then arms and takes off automatically.
+12. **Geofence** — A background thread enforces max altitude and radius. Breach triggers RTL.
+13. **Watchdog** — A background thread detects heartbeat loss and triggers a configurable fail action (RTL/LAND).
 
 ### Camera / Vision
 
@@ -487,10 +602,13 @@ yolo export model=models/yolov8n.pt format=engine device=0
 
 ### Repository
 
-21. **Models are gitignored** — `models/*.pt` is in `.gitignore`. Never commit large binary files.
+21. **Models are gitignored** — `models/*.pt`, `*.engine`, `*.onnx` are in `.gitignore`. Never commit large binary files.
 22. **Logs are gitignored** — `logs/` can contain GBs of MAVLink data. Keep it out of git.
 23. **Check before push** — `git diff --cached` to verify no secrets, tokens, or IPs are staged.
 24. **Commit style** — Use conventional commits: `feat:`, `fix:`, `docs:`, `chore:`.
+25. **Docker** — `make docker-build && make docker-run` for a containerized environment.
+26. **CI** — `.github/workflows/ci.yml` runs lint + tests on every push.
+27. **Pre-commit** — `make precommit` runs ruff, trailing-whitespace, end-of-file-fixer checks.
 
 ---
 
@@ -536,23 +654,72 @@ yolo export model=models/yolov8n.pt format=engine device=0
 - Type hints preferred but not required
 - All scripts should be runnable with `python <path>` from the repo root
 
+### Linting & Pre-commit
+
+```bash
+make precommit          # Run all pre-commit hooks (ruff, trailing-whitespace, etc.)
+make lint               # Run ruff check
+```
+
+### Testing
+
+```bash
+make test               # Run all tests
+make test-detector      # Run vision detector tests only
+make test-controller    # Run drone controller tests only
+```
+
+Tests use pytest with mocked MAVLink / camera. Add new test files in `tests/` following the `test_*.py` pattern.
+
+### Docker
+
+```bash
+make docker-build       # Build Docker image (uses Dockerfile)
+make docker-run         # Run container with --privileged for USB/serial access
+make docker-shell       # Open interactive shell inside container
+```
+
+### TLog Analysis
+
+```bash
+make parse-tlog         # Parse logs/*.tlog to CSV
+make parse-tlog FILE=path/to/log.tlog
+```
+
 ---
 
 ## Testing
 
-No automated test suite is currently included. To manually verify:
+Python `pytest` suite in `tests/` with 15+ test cases covering the core modules.
 
 ```bash
-# Verify camera (choose one):
-python vision/csi_stream.py        # CSI camera
-python vision/usb_stream.py        # USB camera + YOLO
-python vision/camera_test.py       # Serial camera
+make test               # Run all tests
+make test-detector      # tests/test_detector.py
+make test-controller    # tests/test_controller.py
+make test-health        # tests/test_health.py
+```
 
-# Verify Pixhawk link:
+### Test Coverage
+
+| Module | File | Tests |
+|--------|------|-------|
+| Vision | `tests/test_detector.py` | Model load, image inference, frame overlay, confidence filter, empty frame |
+| Drone | `tests/test_controller.py` | Connect, arm, disarm, takeoff, land, RTL, fly_to, set_mode, pre-arm, geofence, watchdog, state |
+| Health | `tests/test_health.py` | Ping endpoint, full health state |
+
+### Manual Verification
+
+```bash
+# Camera:
+python vision/csi_stream.py          # CSI camera
+python vision/usb_stream.py          # USB + YOLO
+python vision/usb_tracker.py         # USB + YOLO + tracking
+
+# Pixhawk link:
 python drone/telemetry.py
 
-# Verify dashboard:
-python drone/dashboard/app.py
+# Autonomous mission:
+python drone/corridor_scout.py --no-vision --alt 10 --length 50 --width 20
 ```
 
 ---

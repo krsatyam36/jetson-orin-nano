@@ -1,167 +1,93 @@
-#!/usr/bin/env python3
 """
-Autonomous Corridor Scout Mission (Drone)
+Autonomous Corridor Scout Mission — revised.
 
-An end-to-end drone reconnaissance script for a Pixhawk-equipped UAV.
-It performs the following tasks:
-
-  1. MAVLink Connection — Auto-detects the Pixhawk on /dev/ttyACM*,
-     receives GPS position and altitude at 10 Hz.
-  2. Path Planning — Generates a zigzag (lawnmower) corridor pattern
-     based on configurable length, width, and lane spacing.
-  3. Waypoint Navigation — Sequentially flies to each waypoint at
-     FLIGHT_ALTITUDE using SET_POSITION_TARGET_GLOBAL_INT commands.
-  4. Video Feed — Streams an OSD-overlaid camera feed (Arducam / USB)
-     to http://<jetson-ip>:8000 via a built-in HTTP MJPEG server.
-  5. Voice Status — Uses espeak for audible status announcements
-     ("Scout Unit Online", "Scan Complete").
-
-The mission starts automatically once the drone exceeds 3m altitude
-(takeoff detected).
+Uses DroneController for MAVLink and Detector for vision. Adds:
+  - Pre-arm checklist                              - Automated takeoff
+  - Geofence + watchdog (via controller)            - Health endpoint
+  - RTL on mission complete                        - Configurable corridor
 
 Usage:
-  python corridor_scout.py
-  Open http://<jetson-ip>:8000 in a browser for the video feed.
-  The drone must be in GUIDED mode and armed.
+  python drone/corridor_scout.py --length 150 --width 50 --alt 20
+  Then open http://<jetson-ip>:8000 for the video feed.
+
+The drone must be armed and in GUIDED mode. The mission starts automatically
+after takeoff (altitude > 3m).
 """
 
 import time
-import cv2
-import threading
-import os
-import io
 import math
-import glob
-import xml.etree.ElementTree as ET
+import os
+import threading
+import argparse
+
+import cv2
 import socketserver
 from http import server
 from threading import Condition
-from pymavlink import mavutil
 
-# ==============================================================================
-#   SCOUT CONFIGURATION (CORRIDOR SETTINGS)
-# ==============================================================================
-# HEIGHT: 50 Feet = ~15 Meters
-FLIGHT_ALTITUDE = 15.24 
+from vision.detector import Detector
+from drone.controller import DroneController
+from drone.health import init_health, health_bp
+from flask import Flask
 
-# CORRIDOR DIMENSIONS (If no KML file is found)
-# It will generate a box around your takeoff point with these sizes:
-CORRIDOR_LENGTH = 100.0  # How long the lines are (Meters)
-CORRIDOR_WIDTH = 40.0    # How wide the total area is (Meters)
-LANE_SPACING = 10.0      # Distance between lines (Meters)
+# ── Configuration ───────────────────────────────────────────────────────
+FLIGHT_ALTITUDE = 15.24       # 50 ft
+CORRIDOR_LENGTH = 100.0       # metres
+CORRIDOR_WIDTH = 40.0
+LANE_SPACING = 10.0
+DETECTOR_CONF = 0.4
+CAMERA_INDEX = 0
 
-# FILE
-KML_FILE = "mission.kml" 
 
-# ==============================================================================
-#   GLOBAL STATE
-# ==============================================================================
-output = None 
-current_lat = 0.0
-current_lon = 0.0
-current_alt = 0.0
-pixhawk_link = None
-is_running = True
-waypoints = []
-
-# ==============================================================================
-#   PATH PLANNING (CORRIDOR GENERATOR)
-# ==============================================================================
-def get_distance_metres(loc1, loc2):
-    dlat = loc2[0] - loc1[0]
-    dlong = loc2[1] - loc1[1]
-    return math.sqrt((dlat*dlat) + (dlong*dlong)) * 1.113195e5
-
-def offset_lat_lon(lat, lon, north_m, east_m):
-    """ Returns a new Lat/Lon given meters offset """
-    new_lat = lat + (north_m / 111319.9)
-    new_lon = lon + (east_m / (111319.9 * math.cos(math.radians(lat))))
-    return (new_lat, new_lon)
-
-def generate_zigzag_path(start_lat, start_lon):
-    """ Generates a Corridor Zig-Zag (Lawnmower) Pattern """
-    print(f">> [PLANNER] Generating Corridor: {CORRIDOR_LENGTH}m Long x {CORRIDOR_WIDTH}m Wide")
-    
-    points = []
-    num_lanes = int(CORRIDOR_WIDTH / LANE_SPACING) + 1
-    
-    # Generate points relative to start location
-    # Assumes flying North-South lines, moving East
-    for i in range(num_lanes):
-        offset_east = i * LANE_SPACING
-        
-        if i % 2 == 0:
-            # Even Lanes: Fly North (0 -> Length)
-            p1 = offset_lat_lon(start_lat, start_lon, 0, offset_east)
-            p2 = offset_lat_lon(start_lat, start_lon, CORRIDOR_LENGTH, offset_east)
-            points.append(p1)
-            points.append(p2)
-        else:
-            # Odd Lanes: Fly South (Length -> 0)
-            p1 = offset_lat_lon(start_lat, start_lon, CORRIDOR_LENGTH, offset_east)
-            p2 = offset_lat_lon(start_lat, start_lon, 0, offset_east)
-            points.append(p1)
-            points.append(p2)
-            
-    print(f">> [PLANNER] Path Generated: {len(points)} Waypoints.")
-    return points
-
-# ==============================================================================
-#   MAVLINK & CONTROL
-# ==============================================================================
-def mavlink_loop():
-    global current_lat, current_lon, current_alt, pixhawk_link
-    while is_running:
-        try:
-            if not pixhawk_link:
-                ports = glob.glob('/dev/ttyACM*')
-                for port in ports:
-                    try:
-                        temp_link = mavutil.mavlink_connection(port, baud=57600)
-                        msg = temp_link.wait_heartbeat(timeout=2)
-                        if msg:
-                            print(f">> [FC] HEARTBEAT FOUND on {port}!")
-                            pixhawk_link = temp_link
-                            pixhawk_link.mav.request_data_stream_send(
-                                pixhawk_link.target_system, pixhawk_link.target_component,
-                                mavutil.mavlink.MAV_DATA_STREAM_POSITION, 10, 1)
-                            break
-                        else: temp_link.close()
-                    except: pass
-                if not pixhawk_link: time.sleep(2)
-
-            if pixhawk_link:
-                msg = pixhawk_link.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=1.0)
-                if msg:
-                    current_lat = msg.lat / 1e7
-                    current_lon = msg.lon / 1e7
-                    current_alt = msg.relative_alt / 1000.0
-        except:
-            pixhawk_link = None
-            time.sleep(1)
-
-def fly_to(lat, lon):
-    if not pixhawk_link: return
-    # Send GUIDED command
-    pixhawk_link.mav.set_position_target_global_int_send(
-        0, 0, 0,
-        mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-        0b0000111111111000,
-        int(lat * 1e7), int(lon * 1e7), FLIGHT_ALTITUDE,
-        0, 0, 0, 0, 0, 0, 0, 0)
-
-# ==============================================================================
-#   VIDEO SERVER
-# ==============================================================================
-class StreamingOutput(object):
+# ── Global state ────────────────────────────────────────────────────────
+class StreamingOutput:
     def __init__(self):
         self.frame = None
-        self.buffer = io.BytesIO()
         self.condition = Condition()
+
     def write(self, frame):
         with self.condition:
             self.frame = frame
             self.condition.notify_all()
+
+
+output = StreamingOutput()
+waypoints: list[tuple[float, float]] = []
+wp_index = 0
+mission_started = False
+detector: Detector | None = None
+ctrl = DroneController()
+
+
+# ── Path planning ───────────────────────────────────────────────────────
+
+def offset_lat_lon(lat: float, lon: float, north_m: float, east_m: float) -> tuple[float, float]:
+    new_lat = lat + (north_m / 111319.9)
+    new_lon = lon + (east_m / (111319.9 * math.cos(math.radians(lat))))
+    return new_lat, new_lon
+
+
+def generate_zigzag_path(start_lat: float, start_lon: float) -> list[tuple[float, float]]:
+    print(f"[planner] Generating corridor: {CORRIDOR_LENGTH}m × {CORRIDOR_WIDTH}m")
+    points = []
+    num_lanes = int(CORRIDOR_WIDTH / LANE_SPACING) + 1
+
+    for i in range(num_lanes):
+        offset_east = i * LANE_SPACING
+        if i % 2 == 0:
+            p1 = offset_lat_lon(start_lat, start_lon, 0, offset_east)
+            p2 = offset_lat_lon(start_lat, start_lon, CORRIDOR_LENGTH, offset_east)
+        else:
+            p1 = offset_lat_lon(start_lat, start_lon, CORRIDOR_LENGTH, offset_east)
+            p2 = offset_lat_lon(start_lat, start_lon, 0, offset_east)
+        points.append(p1)
+        points.append(p2)
+
+    print(f"[planner] {len(points)} waypoints generated")
+    return points
+
+
+# ── Video server ────────────────────────────────────────────────────────
 
 class StreamingHandler(server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -170,8 +96,9 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html')
             self.end_headers()
             self.wfile.write(b"<html><body style='background:black; color:cyan;'>")
-            self.wfile.write(b"<h1>SCOUT 1 - RECON FEED</h1>")
-            self.wfile.write(b"<img src='stream.mjpg' style='width:100%; border:2px solid cyan;'/></body></html>")
+            self.wfile.write(b"<h1>SCOUT - CORRIDOR SCAN</h1>")
+            self.wfile.write(b"<img src='stream.mjpg' style='width:100%;'/></body></html>")
+
         elif self.path == '/stream.mjpg':
             self.send_response(200)
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
@@ -187,100 +114,173 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(jpeg.tobytes())
                     self.wfile.write(b'\r\n')
-            except: pass
+            except Exception:
+                pass
+
 
 class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-# ==============================================================================
-#   MAIN
-# ==============================================================================
-def main():
-    global output, waypoints
-    output = StreamingOutput()
-    
-    # 1. Connect FC
-    threading.Thread(target=mavlink_loop, daemon=True).start()
-    
-    # 2. Start Video Server
-    try:
-        server = StreamingServer(('', 8000), StreamingHandler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-    except: pass
 
-    os.system('espeak "Scout Unit Online." -v en-us+f3 -s 130 --stdout | aplay 2>/dev/null &')
+def run_video_server(port: int = 8000):
+    server = StreamingServer(('', port), StreamingHandler)
+    print(f"[video] Streaming on :{port}")
+    server.serve_forever()
 
-    # 3. Path Planning (Wait for GPS)
-    print(">> [INIT] Waiting for GPS lock...")
-    while current_lat == 0:
+
+# ── Mission ─────────────────────────────────────────────────────────────
+
+def run_mission():
+    global waypoints, wp_index, mission_started
+
+    # 1. Get GPS
+    print("[mission] Waiting for GPS lock...")
+    while ctrl.state().lat == 0:
         time.sleep(1)
-        
-    print(f">> [GPS] Locked at {current_lat}, {current_lon}")
-    waypoints = generate_zigzag_path(current_lat, current_lon)
-    
-    # 4. Camera Init
-    print(">> [CAM] Initializing Arducam...")
-    cap = None
-    for i in range(4):
-        try:
-            temp_cap = cv2.VideoCapture(i)
-            temp_cap.set(3, 640)
-            temp_cap.set(4, 480)
-            if temp_cap.isOpened():
-                ret, _ = temp_cap.read()
-                if ret:
-                    cap = temp_cap
-                    break
-                else: temp_cap.release()
-        except: pass
-    
+    lat, lon = ctrl.state().lat, ctrl.state().lon
+    print(f"[mission] GPS locked at {lat:.6f}, {lon:.6f}")
+
+    # 2. Generate path
+    waypoints = generate_zigzag_path(lat, lon)
+
+    # 3. Pre-arm check
+    failures = ctrl.pre_arm_check()
+    if failures:
+        print("[mission] Pre-arm FAILED:")
+        for f in failures:
+            print(f"  ✗ {f}")
+        print("[mission] Fix issues and re-run")
+        return
+
+    print("[mission] Pre-arm passed")
+
+    # 4. Arm
+    if not ctrl.arm():
+        print("[mission] Arm failed")
+        return
+    print("[mission] Armed")
+
+    # 5. Takeoff
+    if not ctrl.takeoff(FLIGHT_ALTITUDE):
+        print("[mission] Takeoff failed")
+        return
+
+    # 6. Main navigation loop
     wp_index = 0
-    mission_started = False
-    
-    while True:
-        # Camera & OSD
-        if cap:
+    mission_started = True
+    print(f"[mission] Mission started — {len(waypoints)} waypoints")
+
+    try:
+        while True:
+            s = ctrl.state()
+            if wp_index < len(waypoints):
+                target = waypoints[wp_index]
+                dist = ctrl.distance_to(target[0], target[1])
+                ctrl.fly_to(target[0], target[1], FLIGHT_ALTITUDE)
+                print(f"[nav] WP {wp_index + 1}/{len(waypoints)} — {dist:.1f}m away")
+
+                if dist < 3.0:
+                    print(f"[nav] Reached WP {wp_index + 1}")
+                    wp_index += 1
+                    if wp_index >= len(waypoints):
+                        print("[nav] All waypoints complete — returning to launch")
+                        os.system('espeak "Scan complete. Returning to launch." 2>/dev/null &')
+                        ctrl.rtl()
+                        break
+            else:
+                break
+
+            # Camera + OSD
+            cap = cv2.VideoCapture(CAMERA_INDEX)
             ret, frame = cap.read()
             if ret:
-                # OSD for Judges
-                cv2.putText(frame, "STATUS: SCANNING", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"GPS: {current_lat:.5f}, {current_lon:.5f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                if mission_started:
-                     cv2.putText(frame, "UPLINK: TRANSMITTING", (10, 450), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                detections = detector.track(frame) if detector else []
+                for d in detections:
+                    if d.class_name == "person":
+                        x1, y1, x2, y2 = d.bbox
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                        cv2.putText(frame, f"{d.class_name} #{d.track_id}", (x1, y1 - 8),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+                cv2.putText(frame, f"WP: {wp_index}/{len(waypoints)}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.putText(frame, f"GPS: {s.lat:.5f}, {s.lon:.5f}", (10, 55),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.putText(frame, f"ALT: {s.alt_rel:.1f}m", (10, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.putText(frame, f"BAT: {s.battery_voltage:.1f}V", (10, 105),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+                if wp_index < len(waypoints):
+                    cv2.putText(frame, "MISSION: ACTIVE", (10, 130),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                else:
+                    cv2.putText(frame, "MISSION: COMPLETE — RTL", (10, 130),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
                 output.write(frame)
+            cap.release()
 
-        # FAKE DATA TRANSMISSION
-        if mission_started and int(time.time()) % 3 == 0:
-             print(f">> [COMMS] UPLINK SENT: {current_lat:.6f}, {current_lon:.6f} | MULE ACK RECEIVED")
+            time.sleep(0.5)
 
-        # MISSION CONTROL
-        if pixhawk_link:
-            # Check Flight Mode (You have to implement mode reading or just wait for GUIDED)
-            # For simplicity, we assume if we are receiving GPS and user enables script, we fly
-            # Here we just assume if altitude > 3m, user has taken off
-            if not mission_started and current_alt > 3.0:
-                print(">> [MISSION] TAKEOFF DETECTED. STARTING CORRIDOR SCAN.")
-                mission_started = True
-                
-        # FLIGHT LOGIC
-        if mission_started and wp_index < len(waypoints):
-             target = waypoints[wp_index]
-             dist = get_distance_metres((current_lat, current_lon), target)
-             
-             # Send "Go To" Command
-             fly_to(target[0], target[1])
-             print(f">> [NAV] Flying to WP {wp_index+1}/{len(waypoints)} (Dist: {dist:.1f}m)")
-             
-             if dist < 3.0: # Waypoint reached
-                 print(f">> [NAV] REACHED WP {wp_index+1}")
-                 wp_index += 1
-                 if wp_index >= len(waypoints):
-                     print(">> [NAV] SCAN COMPLETE. HOVERING.")
-                     os.system('espeak "Scan Complete." -v en-us+f3 -s 130 --stdout | aplay 2>/dev/null &')
-                     # Stay at last point
-                     
-        time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\n[mission] Interrupted — RTL")
+        ctrl.rtl()
+    finally:
+        mission_started = False
+        ctrl.close()
 
-if __name__ == '__main__':
+
+# ── Entry point ─────────────────────────────────────────────────────────
+
+def main():
+    global detector, FLIGHT_ALTITUDE, CORRIDOR_LENGTH, CORRIDOR_WIDTH, LANE_SPACING, DETECTOR_CONF
+
+    parser = argparse.ArgumentParser(description="Corridor scout mission")
+    parser.add_argument("--alt", type=float, default=FLIGHT_ALTITUDE, help="Flight altitude (m)")
+    parser.add_argument("--length", type=float, default=CORRIDOR_LENGTH, help="Corridor length (m)")
+    parser.add_argument("--width", type=float, default=CORRIDOR_WIDTH, help="Corridor width (m)")
+    parser.add_argument("--lane", type=float, default=LANE_SPACING, help="Lane spacing (m)")
+    parser.add_argument("--conf", type=float, default=DETECTOR_CONF, help="Detection confidence")
+    parser.add_argument("--no-vision", action="store_true", help="Skip YOLO detection")
+    parser.add_argument("--port", type=int, default=8000, help="Video stream port")
+    args = parser.parse_args()
+
+    FLIGHT_ALTITUDE = args.alt
+    CORRIDOR_LENGTH = args.length
+    CORRIDOR_WIDTH = args.width
+    LANE_SPACING = args.lane
+    DETECTOR_CONF = args.conf
+
+    # Init detector
+    if not args.no_vision:
+        try:
+            detector = Detector("models/yolov8n.pt", conf_threshold=DETECTOR_CONF)
+        except Exception as e:
+            print(f"[main] Detector init failed: {e}")
+            detector = None
+
+    # Connect controller
+    print("[main] Connecting to Pixhawk...")
+    if not ctrl.connect():
+        print("[main] No Pixhawk — running in simulation mode")
+
+    # Set geofence
+    ctrl.set_geofence(max_alt=FLIGHT_ALTITUDE + 20, max_radius=CORRIDOR_WIDTH * 3)
+
+    # Health endpoint on a daemon thread via Flask
+    health_app = Flask(__name__)
+    health_app.register_blueprint(health_bp)
+    init_health(ctrl)
+    threading.Thread(target=health_app.run, kwargs={"host": "0.0.0.0", "port": 9090, "debug": False}, daemon=True).start()
+
+    # Video server thread
+    threading.Thread(target=run_video_server, args=(args.port,), daemon=True).start()
+
+    # Run mission (blocking)
+    run_mission()
+
+
+if __name__ == "__main__":
     main()
