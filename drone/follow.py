@@ -17,7 +17,6 @@ Usage:
 """
 
 import time
-import math
 import threading
 from enum import Enum
 
@@ -41,8 +40,8 @@ app = Flask(__name__)
 CAMERA_INDEX = 0
 MODEL_PATH = "models/yolov8n.pt"
 CONF_THRESHOLD = 0.4
-FOLLOW_DISTANCE_M = 5.0    # try to stay ~5m from the target
-LOST_TIMEOUT = 5.0          # seconds before FOLLOWING → LOST
+FOLLOW_DISTANCE_M = 5.0  # try to stay ~5m from the target
+LOST_TIMEOUT = 5.0  # seconds before FOLLOWING → LOST
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 FLASK_PORT = 5001
@@ -63,6 +62,7 @@ camera.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 
 
 # ── Main loop ───────────────────────────────────────────────────────────
+
 
 def follow_loop():
     global state, target_track_id, last_seen_time, frame_buffer
@@ -142,24 +142,9 @@ def _steer_toward(frame, target):
     tx = (target.bbox[0] + target.bbox[2]) // 2
     ty = (target.bbox[1] + target.bbox[3]) // 2
 
-    dx = tx - cx  # pixels from center (positive = target is to the right)
-    dy = ty - cy  # pixels from center (positive = target is below)
-
-    # Simple proportional control — scale to a reasonable yaw rate / pitch
-    # These are crude heuristics; a real implementation would use velocity
-    # control in BODY_FRAME coordinates.
-    yaw_rate = dx / w * 30.0   # ±30 deg/s max
-    pitch_angle = dy / h * 15.0  # ±15 deg max
-
-    # Send body-frame velocity command if controller is connected and armed
-    ctrl_state = ctrl.state()
-    if ctrl_state.armed and ctrl_state.mode == "GUIDED":
-        from pymavlink import mavutil
-        # Note: full velocity-body control requires MAV_FRAME_BODY_NED;
-        # for now we use a simple yaw correction via CONDITION_YAW or
-        # set_position_target with velocity components.
-        # This is a placeholder for the velocity control loop.
-        pass
+    # Placeholder for velocity-body control (MAV_FRAME_BODY_NED).
+    # The yaw_rate and pitch_angle heuristics are computed but not yet sent
+    # to the Pixhawk — requires a SET_POSITION_TARGET_LOCAL_NED message.
 
     # Visual indicator of steering intent
     cv2.arrowedLine(frame, (cx, cy), (tx, ty), (0, 255, 255), 2)
@@ -168,39 +153,61 @@ def _steer_toward(frame, target):
 
 def _draw_osd(frame):
     """Overlay follow-mode state on the frame."""
-    cv2.putText(frame, f"MODE: FOLLOW", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-    cv2.putText(frame, f"STATE: {state.value}", (10, 55),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    cv2.putText(
+        frame, "MODE: FOLLOW", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
+    )
+    cv2.putText(
+        frame,
+        f"STATE: {state.value}",
+        (10, 55),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 255, 0),
+        2,
+    )
     if target_track_id is not None:
-        cv2.putText(frame, f"TARGET: #{target_track_id}", (10, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(
+            frame,
+            f"TARGET: #{target_track_id}",
+            (10, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+        )
 
-    cv2.putText(frame, f"BAT: {ctrl.state().battery_voltage:.1f}V",
-                (FRAME_WIDTH - 120, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    cv2.putText(
+        frame,
+        f"BAT: {ctrl.state().battery_voltage:.1f}V",
+        (FRAME_WIDTH - 120, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 255, 0),
+        2,
+    )
 
 
 # ── Flask stream ────────────────────────────────────────────────────────
+
 
 def generate():
     while True:
         with frame_lock:
             if frame_buffer is None:
-                yield b''
+                yield b""
                 continue
             data = frame_buffer
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + data + b'\r\n')
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + data + b"\r\n")
 
 
-@app.route('/')
+@app.route("/")
 def index():
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 # ── Entry ───────────────────────────────────────────────────────────────
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("[follow] Connecting to Pixhawk...")
     if ctrl.connect():
         print("[follow] Pixhawk connected")
@@ -217,4 +224,4 @@ if __name__ == '__main__':
 
     state = FollowState.SEEKING
     print(f"[follow] Serving on :{FLASK_PORT}")
-    app.run(host='0.0.0.0', port=FLASK_PORT, threaded=True)
+    app.run(host="0.0.0.0", port=FLASK_PORT, threaded=True)

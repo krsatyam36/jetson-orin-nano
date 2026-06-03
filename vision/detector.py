@@ -25,7 +25,9 @@ except ImportError:
 from collections import namedtuple
 from pathlib import Path
 
-Detection = namedtuple("Detection", ["track_id", "bbox", "confidence", "class_name", "class_id"])
+Detection = namedtuple(
+    "Detection", ["track_id", "bbox", "confidence", "class_name", "class_id"]
+)
 
 
 class Detector:
@@ -95,16 +97,19 @@ class Detector:
 
     def _load_tensorrt(self):
         try:
-            import tensorrt as trt
-            import pycuda.driver as cuda
-            import pycuda.autoinit
+            import tensorrt as trt  # noqa: F401
+            import pycuda.driver as cuda  # noqa: F401
+            import pycuda.autoinit  # noqa: F401
         except ImportError:
-            print("[detector] TensorRT/pycuda not available, falling back to ultralytics")
+            print(
+                "[detector] TensorRT/pycuda not available, falling back to ultralytics"
+            )
             self._load_ultralytics()
             return
 
         try:
             from ultralytics import YOLO
+
             self._model = YOLO(str(self.model_path))
             self._class_names = list(self._model.names.values())
             self._backend = "tensorrt"
@@ -114,7 +119,7 @@ class Detector:
 
     def _load_onnx(self):
         try:
-            import onnxruntime as ort
+            import onnxruntime as ort  # noqa: F401
         except ImportError:
             print("[detector] ONNX Runtime not available, falling back to ultralytics")
             self._load_ultralytics()
@@ -122,6 +127,7 @@ class Detector:
 
         try:
             from ultralytics import YOLO
+
             self._model = YOLO(str(self.model_path))
             self._class_names = list(self._model.names.values())
             self._backend = "onnx"
@@ -150,13 +156,29 @@ class Detector:
         if r.boxes is None:
             return detections
 
-        boxes_xyxy = r.boxes.xyxy.int().cpu().tolist() if hasattr(r.boxes.xyxy, "cpu") else r.boxes.xyxy.int().tolist()
-        class_ids = r.boxes.cls.int().cpu().tolist() if hasattr(r.boxes.cls, "cpu") else r.boxes.cls.int().tolist()
-        confs = r.boxes.conf.cpu().tolist() if hasattr(r.boxes.conf, "cpu") else r.boxes.conf.tolist()
+        boxes_xyxy = (
+            r.boxes.xyxy.int().cpu().tolist()
+            if hasattr(r.boxes.xyxy, "cpu")
+            else r.boxes.xyxy.int().tolist()
+        )
+        class_ids = (
+            r.boxes.cls.int().cpu().tolist()
+            if hasattr(r.boxes.cls, "cpu")
+            else r.boxes.cls.int().tolist()
+        )
+        confs = (
+            r.boxes.conf.cpu().tolist()
+            if hasattr(r.boxes.conf, "cpu")
+            else r.boxes.conf.tolist()
+        )
 
         track_ids = None
         if track and r.boxes.id is not None:
-            tid = r.boxes.id.int().cpu().tolist() if hasattr(r.boxes.id, "cpu") else r.boxes.id.int().tolist()
+            tid = (
+                r.boxes.id.int().cpu().tolist()
+                if hasattr(r.boxes.id, "cpu")
+                else r.boxes.id.int().tolist()
+            )
             track_ids = tid
 
         for i in range(len(boxes_xyxy)):
@@ -165,7 +187,11 @@ class Detector:
                 continue
 
             class_id = class_ids[i]
-            class_name = self._class_names[class_id] if class_id < len(self._class_names) else "unknown"
+            class_name = (
+                self._class_names[class_id]
+                if class_id < len(self._class_names)
+                else "unknown"
+            )
             tid = track_ids[i] if track_ids else None
 
             detections.append(
@@ -181,7 +207,9 @@ class Detector:
         return detections
 
 
-def draw_detections(frame: np.ndarray, detections: list[Detection], label: bool = True) -> None:
+def draw_detections(
+    frame: np.ndarray, detections: list[Detection], label: bool = True
+) -> None:
     """Draw bounding boxes and labels on a frame (in-place)."""
     for d in detections:
         if d.track_id is not None:
@@ -197,4 +225,6 @@ def draw_detections(frame: np.ndarray, detections: list[Detection], label: bool 
             if d.track_id is not None:
                 text += f" #{d.track_id}"
             text += f" {d.confidence:.2f}"
-            cv2.putText(frame, text, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.putText(
+                frame, text, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2
+            )

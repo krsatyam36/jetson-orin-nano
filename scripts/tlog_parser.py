@@ -24,9 +24,9 @@ def parse_tlog(path: str) -> list[dict]:
         msg = mlog.recv_match(blocking=False)
         if msg is None:
             break
-        row = {"type": msg.get_type(), "timestamp": getattr(msg, '_timestamp', 0)}
+        row = {"type": msg.get_type(), "timestamp": getattr(msg, "_timestamp", 0)}
         for field in msg.__dict__:
-            if not field.startswith('_'):
+            if not field.startswith("_"):
                 row[field] = getattr(msg, field)
         rows.append(row)
 
@@ -65,7 +65,9 @@ def main():
     parser = argparse.ArgumentParser(description="Parse MAVLink .tlog files")
     parser.add_argument("path", help="Path to .tlog file")
     parser.add_argument("--csv", help="Export to CSV file")
-    parser.add_argument("--summary", action="store_true", default=True, help="Print summary")
+    parser.add_argument(
+        "--summary", action="store_true", default=True, help="Print summary"
+    )
     args = parser.parse_args()
 
     if not Path(args.path).exists():

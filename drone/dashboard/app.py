@@ -21,21 +21,23 @@ Usage:
 """
 
 import eventlet
+
 eventlet.monkey_patch()
 
-from flask import Flask, render_template
-from flask_socketio import SocketIO
-import random
-import threading
-import time
-import webbrowser # Trigger the browser automatically
+from flask import Flask, render_template  # noqa: E402
+from flask_socketio import SocketIO  # noqa: E402
+import random  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import webbrowser  # noqa: E402
 
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode='eventlet')
+socketio = SocketIO(app, async_mode="eventlet")
 
 # Scout Drone Specs
 KV_RATING = 935
 POLES = 14
+
 
 def simulate_drone_data():
     """Generates mock telemetry for the Scout Drone (2.8kg TOW)"""
@@ -43,39 +45,43 @@ def simulate_drone_data():
         # Simulate a 4S battery (14.8V - 16.5V)
         voltage = round(random.uniform(15.5, 16.5), 2)
         motor_data = []
-        
+
         for i in range(1, 5):
             # Realistic current for Emax 2213 under high load
             current = round(random.uniform(12.0, 17.5), 2)
             # RPM = Voltage * KV * Efficiency factor
-            rpm = int(voltage * KV_RATING * 0.85) 
+            rpm = int(voltage * KV_RATING * 0.85)
             # Thrust calculation based on RPM for 10-inch props
-            thrust_grams = int((rpm / 1000)**2 * 11) 
-            
-            motor_data.append({
-                "id": i,
-                "rpm": rpm,
-                "voltage": voltage,
-                "current": current,
-                "thrust": thrust_grams,
-                "direction": "CW" if i in [3, 4] else "CCW"
-            })
-        
-        socketio.emit('telemetry_update', motor_data)
+            thrust_grams = int((rpm / 1000) ** 2 * 11)
+
+            motor_data.append(
+                {
+                    "id": i,
+                    "rpm": rpm,
+                    "voltage": voltage,
+                    "current": current,
+                    "thrust": thrust_grams,
+                    "direction": "CW" if i in [3, 4] else "CCW",
+                }
+            )
+
+        socketio.emit("telemetry_update", motor_data)
         time.sleep(0.5)
 
-@app.route('/')
+
+@app.route("/")
 def index():
     """Renders the dashboard template"""
-    return render_template('template.html')
+    return render_template("template.html")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # 1. Start simulation thread
     threading.Thread(target=simulate_drone_data, daemon=True).start()
-    
+
     # 2. Automatically open the browser on the Jetson Orin
     # This happens only when you run the script
     webbrowser.open("http://127.0.0.1:5000")
-    
+
     # 3. Run using socketio to avoid Eventlet RuntimeErrors
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, log_output=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True, log_output=True)

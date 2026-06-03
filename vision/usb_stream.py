@@ -32,7 +32,6 @@ remembered_human_ids = set()
 
 
 def generate_frames():
-    global remembered_human_ids
 
     while True:
         success, frame = camera.read()
@@ -60,17 +59,21 @@ def generate_frames():
                 thickness = 3
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
-            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.putText(
+                frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2
+            )
 
-        ret, buffer = cv2.imencode('.jpg', frame)
+        ret, buffer = cv2.imencode(".jpg", frame)
         frame = buffer.tobytes()
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
 
 
-@app.route('/')
+@app.route("/")
 def index():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, threaded=True)

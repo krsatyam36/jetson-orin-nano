@@ -51,12 +51,14 @@ def health():
     uptime = time.time() - _start_time
 
     if ctrl is None:
-        return jsonify({
-            "status": "degraded",
-            "uptime_seconds": round(uptime),
-            "drone": None,
-            "message": "No DroneController linked",
-        })
+        return jsonify(
+            {
+                "status": "degraded",
+                "uptime_seconds": round(uptime),
+                "drone": None,
+                "message": "No DroneController linked",
+            }
+        )
 
     s = ctrl.state()
 
@@ -69,42 +71,44 @@ def health():
             "failures": failures,
         }
 
-    return jsonify({
-        "status": "ok" if s.heartbeat_ok else "degraded",
-        "uptime_seconds": round(uptime),
-        "drone": {
-            "armed": s.armed,
-            "mode": s.mode,
-            "heartbeat": s.heartbeat_ok,
-            "ekf_ok": s.ekf_ok,
-            "position": {
-                "lat": s.lat,
-                "lon": s.lon,
-                "alt_rel_m": round(s.alt_rel, 1),
-                "alt_abs_m": round(s.alt_abs, 1),
-                "heading_deg": round(s.heading, 1),
+    return jsonify(
+        {
+            "status": "ok" if s.heartbeat_ok else "degraded",
+            "uptime_seconds": round(uptime),
+            "drone": {
+                "armed": s.armed,
+                "mode": s.mode,
+                "heartbeat": s.heartbeat_ok,
+                "ekf_ok": s.ekf_ok,
+                "position": {
+                    "lat": s.lat,
+                    "lon": s.lon,
+                    "alt_rel_m": round(s.alt_rel, 1),
+                    "alt_abs_m": round(s.alt_abs, 1),
+                    "heading_deg": round(s.heading, 1),
+                },
+                "attitude": {
+                    "roll_rad": round(s.roll, 3),
+                    "pitch_rad": round(s.pitch, 3),
+                    "yaw_rad": round(s.yaw, 3),
+                },
+                "speed": {
+                    "ground_mps": round(s.ground_speed, 1),
+                    "air_mps": round(s.air_speed, 1),
+                },
+                "battery": {
+                    "voltage": round(s.battery_voltage, 2),
+                    "current_a": round(s.battery_current, 2),
+                    "remaining_pct": round(s.battery_remaining, 1),
+                },
+                "gps": {
+                    "satellites": s.satellites_visible,
+                    "fix_type": s.fix_type,
+                },
             },
-            "attitude": {
-                "roll_rad": round(s.roll, 3),
-                "pitch_rad": round(s.pitch, 3),
-                "yaw_rad": round(s.yaw, 3),
-            },
-            "speed": {
-                "ground_mps": round(s.ground_speed, 1),
-                "air_mps": round(s.air_speed, 1),
-            },
-            "battery": {
-                "voltage": round(s.battery_voltage, 2),
-                "current_a": round(s.battery_current, 2),
-                "remaining_pct": round(s.battery_remaining, 1),
-            },
-            "gps": {
-                "satellites": s.satellites_visible,
-                "fix_type": s.fix_type,
-            },
-        },
-        "pre_arm": pre_arm,
-    })
+            "pre_arm": pre_arm,
+        }
+    )
 
 
 def run_health_server(controller=None, port: int = 9090):

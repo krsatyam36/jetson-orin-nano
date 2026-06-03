@@ -39,7 +39,6 @@ last_seen_times = {}
 
 
 def generate_frames():
-    global first_seen_times, remembered_human_ids, last_seen_times
 
     while True:
         success, frame = camera.read()
@@ -71,7 +70,7 @@ def generate_frames():
 
                 if elapsed >= 60.0:
                     remembered_human_ids.add(tid)
-                    lock_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    lock_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     print(f"\n[!] TARGET LOCKED | ID #{tid} secured at: {lock_ts}\n")
                     color = (0, 0, 255)
                     label = f"TARGET LOCKED #{tid}"
@@ -82,24 +81,31 @@ def generate_frames():
                     thickness = 1
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
-            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.putText(
+                frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2
+            )
 
         for test_id in list(first_seen_times.keys()):
-            if test_id not in active_ids_in_frame and test_id not in remembered_human_ids:
+            if (
+                test_id not in active_ids_in_frame
+                and test_id not in remembered_human_ids
+            ):
                 elapsed_lost = current_time - last_seen_times.get(test_id, current_time)
                 if elapsed_lost > 5.0:
                     del first_seen_times[test_id]
                     last_seen_times.pop(test_id, None)
 
-        ret, buffer = cv2.imencode('.jpg', frame)
+        ret, buffer = cv2.imencode(".jpg", frame)
         frame = buffer.tobytes()
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
 
 
-@app.route('/')
+@app.route("/")
 def index():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        generate_frames(), mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, threaded=True)

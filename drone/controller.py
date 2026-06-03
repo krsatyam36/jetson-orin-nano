@@ -22,13 +22,14 @@ import time
 import math
 import glob
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
 @dataclass
 class DroneState:
     """Read-only snapshot of the drone's current state."""
+
     lat: float = 0.0
     lon: float = 0.0
     alt_rel: float = 0.0
@@ -54,6 +55,7 @@ class DroneState:
 @dataclass
 class GeofenceConfig:
     """Configurable geofence limits. Set any to 0 to disable that axis."""
+
     max_alt_m: float = 100.0
     max_radius_m: float = 500.0
     home_lat: float = 0.0
@@ -63,6 +65,7 @@ class GeofenceConfig:
 @dataclass
 class WatchdogConfig:
     """If heartbeat is lost for timeout_seconds, trigger the fail action."""
+
     timeout_seconds: float = 5.0
     fail_action: str = "RTL"  # "RTL", "LAND", "HOVER", "DISARM"
 
@@ -134,7 +137,8 @@ class DroneController:
             self._link.target_system,
             self._link.target_component,
             mavutil.mavlink.MAV_DATA_STREAM_ALL,
-            10, 1,
+            10,
+            1,
         )
         time.sleep(0.5)
 
@@ -186,7 +190,9 @@ class DroneController:
                     self._last_heartbeat = time.time()
                     self._watchdog_event.set()
                     self._state.armed = (msg.base_mode & 0b10000000) != 0
-                    self._state.mode = mavutil.mode_mapping_acm.get(msg.custom_mode, str(msg.custom_mode))
+                    self._state.mode = mavutil.mode_mapping_acm.get(
+                        msg.custom_mode, str(msg.custom_mode)
+                    )
 
                 elif msg_type == "GLOBAL_POSITION_INT":
                     self._state.lat = msg.lat / 1e7
@@ -226,7 +232,9 @@ class DroneController:
             if self._link is not None and self._state.armed:
                 elapsed = time.time() - self._last_heartbeat
                 if elapsed > self._watchdog.timeout_seconds:
-                    print(f"[watchdog] Heartbeat lost for {elapsed:.1f}s — executing {self._watchdog.fail_action}")
+                    print(
+                        f"[watchdog] Heartbeat lost for {elapsed:.1f}s — executing {self._watchdog.fail_action}"
+                    )
                     if self._watchdog.fail_action == "RTL":
                         self.rtl()
                     elif self._watchdog.fail_action == "LAND":
@@ -241,17 +249,26 @@ class DroneController:
 
     def _geofence_loop(self):
         while self._running:
-            if self._geofence.max_alt_m > 0 and self._state.alt_rel > self._geofence.max_alt_m:
-                print(f"[geofence] Altitude {self._state.alt_rel:.1f}m exceeds limit {self._geofence.max_alt_m}m — RTL")
+            if (
+                self._geofence.max_alt_m > 0
+                and self._state.alt_rel > self._geofence.max_alt_m
+            ):
+                print(
+                    f"[geofence] Altitude {self._state.alt_rel:.1f}m exceeds limit {self._geofence.max_alt_m}m — RTL"
+                )
                 self.rtl()
 
             if self._geofence.max_radius_m > 0 and self._geofence.home_lat != 0:
                 dist = self._haversine(
-                    self._geofence.home_lat, self._geofence.home_lon,
-                    self._state.lat, self._state.lon,
+                    self._geofence.home_lat,
+                    self._geofence.home_lon,
+                    self._state.lat,
+                    self._state.lon,
                 )
                 if dist > self._geofence.max_radius_m:
-                    print(f"[geofence] Distance {dist:.0f}m exceeds limit {self._geofence.max_radius_m}m — RTL")
+                    print(
+                        f"[geofence] Distance {dist:.0f}m exceeds limit {self._geofence.max_radius_m}m — RTL"
+                    )
                     self.rtl()
 
             time.sleep(1.0)
@@ -263,7 +280,9 @@ class DroneController:
 
     # ── Pre-arm checklist ───────────────────────────────────────────────
 
-    def pre_arm_check(self, require_gps_3d: bool = True, min_voltage: float = 14.0) -> list[str]:
+    def pre_arm_check(
+        self, require_gps_3d: bool = True, min_voltage: float = 14.0
+    ) -> list[str]:
         """Run checks and return a list of failures (empty = all good)."""
         failures = []
         time.sleep(1.0)  # let state settle
@@ -273,13 +292,22 @@ class DroneController:
                 failures.append("Drone is already armed — disarm first")
 
             if require_gps_3d and self._state.fix_type < 3:
-                failures.append(f"GPS fix type {self._state.fix_type} — need 3D fix (3)")
+                failures.append(
+                    f"GPS fix type {self._state.fix_type} — need 3D fix (3)"
+                )
 
             if self._state.satellites_visible < 8:
-                failures.append(f"Only {self._state.satellites_visible} satellites — need ≥8")
+                failures.append(
+                    f"Only {self._state.satellites_visible} satellites — need ≥8"
+                )
 
-            if self._state.battery_voltage > 0 and self._state.battery_voltage < min_voltage:
-                failures.append(f"Battery {self._state.battery_voltage:.1f}V below minimum {min_voltage}V")
+            if (
+                self._state.battery_voltage > 0
+                and self._state.battery_voltage < min_voltage
+            ):
+                failures.append(
+                    f"Battery {self._state.battery_voltage:.1f}V below minimum {min_voltage}V"
+                )
 
             if not self._state.heartbeat_ok:
                 failures.append("No MAVLink heartbeat — check connection")
@@ -303,7 +331,14 @@ class DroneController:
             self._link.target_system,
             self._link.target_component,
             400,  # MAV_CMD_COMPONENT_ARM_DISARM
-            0, 1, 0, 0, 0, 0, 0, 0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         time.sleep(1.0)
         with self._state_lock:
@@ -315,7 +350,15 @@ class DroneController:
         self._link.mav.command_long_send(
             self._link.target_system,
             self._link.target_component,
-            400, 0, 0, 0, 0, 0, 0, 0, 0,
+            400,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         time.sleep(1.0)
         with self._state_lock:
@@ -332,7 +375,14 @@ class DroneController:
             self._link.target_system,
             self._link.target_component,
             22,  # MAV_CMD_NAV_TAKEOFF
-            0, 0, 0, 0, 0, 0, 0, altitude_m,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            altitude_m,
         )
 
         # Wait until altitude is reached (with timeout)
@@ -341,7 +391,9 @@ class DroneController:
             time.sleep(0.5)
             with self._state_lock:
                 if self._state.alt_rel >= altitude_m * 0.9:
-                    print(f"[controller] Takeoff complete at {self._state.alt_rel:.1f}m")
+                    print(
+                        f"[controller] Takeoff complete at {self._state.alt_rel:.1f}m"
+                    )
                     return True
         print(f"[controller] Takeoff timeout — at {self._state.alt_rel:.1f}m")
         return False
@@ -356,7 +408,14 @@ class DroneController:
             self._link.target_system,
             self._link.target_component,
             21,  # MAV_CMD_NAV_LAND
-            0, 0, 0, 0, 0, 0, 0, 0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
 
         timeout = time.time() + 60
@@ -378,7 +437,14 @@ class DroneController:
             self._link.target_system,
             self._link.target_component,
             20,  # MAV_CMD_NAV_RETURN_TO_LAUNCH
-            0, 0, 0, 0, 0, 0, 0, 0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         return True
 
@@ -389,11 +455,22 @@ class DroneController:
 
         alt = alt if alt is not None else self._state.alt_rel
         self._link.mav.set_position_target_global_int_send(
-            0, 0, 0,
+            0,
+            0,
+            0,
             3,  # MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
             0b0000111111111000,
-            int(lat * 1e7), int(lon * 1e7), alt,
-            0, 0, 0, 0, 0, 0, 0, 0,
+            int(lat * 1e7),
+            int(lon * 1e7),
+            alt,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
 
     def set_mode(self, mode: str) -> bool:
@@ -409,7 +486,15 @@ class DroneController:
         self._link.mav.command_long_send(
             self._link.target_system,
             self._link.target_component,
-            11, 0, mode_id, 0, 0, 0, 0, 0, 0,
+            11,
+            0,
+            mode_id,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         time.sleep(0.5)
         return True
@@ -423,13 +508,16 @@ class DroneController:
     def offset_position(self, north_m: float, east_m: float):
         """Return (lat, lon) offset by metres north/east from current position."""
         lat = self._state.lat + (north_m / 111319.9)
-        lon = self._state.lon + (east_m / (111319.9 * math.cos(math.radians(self._state.lat))))
+        lon = self._state.lon + (
+            east_m / (111319.9 * math.cos(math.radians(self._state.lat)))
+        )
         return lat, lon
 
     def state(self) -> DroneState:
         """Thread-safe snapshot of current drone state."""
         with self._state_lock:
             import copy
+
             return copy.deepcopy(self._state)
 
     # ── Internals ───────────────────────────────────────────────────────
@@ -441,7 +529,9 @@ class DroneController:
                 if self._state.lat != 0 and self._state.lon != 0:
                     self._geofence.home_lat = self._state.lat
                     self._geofence.home_lon = self._state.lon
-                    print(f"[controller] Home set to {self._state.lat:.6f}, {self._state.lon:.6f}")
+                    print(
+                        f"[controller] Home set to {self._state.lat:.6f}, {self._state.lon:.6f}"
+                    )
                     self._home_set = True
                     return True
             time.sleep(1)
@@ -452,7 +542,9 @@ class DroneController:
     def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         dlat = math.radians(lat2 - lat1)
         dlon = math.radians(lon2 - lon1)
-        a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        cos_lat1 = math.cos(math.radians(lat1))
+        cos_lat2 = math.cos(math.radians(lat2))
+        a = math.sin(dlat / 2) ** 2 + cos_lat1 * cos_lat2 * math.sin(dlon / 2) ** 2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return 6371000 * c
 

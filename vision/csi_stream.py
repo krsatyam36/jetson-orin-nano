@@ -24,7 +24,7 @@ app = Flask(__name__)
 frame_buffer = None
 lock = threading.Lock()
 
-# GSTREAMER PIPELINE (The Magic String for Jetson CSI Cameras)
+
 def gstreamer_pipeline(
     sensor_id=0,
     capture_width=1280,
@@ -52,11 +52,14 @@ def gstreamer_pipeline(
         )
     )
 
+
 def capture_thread():
     global frame_buffer
     # Open Camera with GStreamer
-    cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=0, flip_method=0), cv2.CAP_GSTREAMER)
-    
+    cap = cv2.VideoCapture(
+        gstreamer_pipeline(sensor_id=0, flip_method=0), cv2.CAP_GSTREAMER
+    )
+
     if not cap.isOpened():
         print("ERROR: Could not open CSI Camera!")
         return
@@ -66,23 +69,25 @@ def capture_thread():
         ret, frame = cap.read()
         if ret:
             with lock:
-                # Encode to JPEG
-                _, encoded = cv2.imencode('.jpg', frame)
+                _, encoded = cv2.imencode(".jpg", frame)
                 frame_buffer = encoded.tobytes()
 
+
 def generate():
-    global frame_buffer
     while True:
         with lock:
-            if frame_buffer is None: continue
+            if frame_buffer is None:
+                continue
             data = frame_buffer
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + data + b'\r\n')
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + data + b"\r\n")
 
-@app.route('/')
+
+@app.route("/")
 def index():
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     t = threading.Thread(target=capture_thread)
     t.start()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000, debug=False)

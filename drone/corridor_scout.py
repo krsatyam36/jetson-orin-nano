@@ -31,8 +31,8 @@ from drone.health import init_health, health_bp
 from flask import Flask
 
 # ── Configuration ───────────────────────────────────────────────────────
-FLIGHT_ALTITUDE = 15.24       # 50 ft
-CORRIDOR_LENGTH = 100.0       # metres
+FLIGHT_ALTITUDE = 15.24  # 50 ft
+CORRIDOR_LENGTH = 100.0  # metres
 CORRIDOR_WIDTH = 40.0
 LANE_SPACING = 10.0
 DETECTOR_CONF = 0.4
@@ -61,13 +61,18 @@ ctrl = DroneController()
 
 # ── Path planning ───────────────────────────────────────────────────────
 
-def offset_lat_lon(lat: float, lon: float, north_m: float, east_m: float) -> tuple[float, float]:
+
+def offset_lat_lon(
+    lat: float, lon: float, north_m: float, east_m: float
+) -> tuple[float, float]:
     new_lat = lat + (north_m / 111319.9)
     new_lon = lon + (east_m / (111319.9 * math.cos(math.radians(lat))))
     return new_lat, new_lon
 
 
-def generate_zigzag_path(start_lat: float, start_lon: float) -> list[tuple[float, float]]:
+def generate_zigzag_path(
+    start_lat: float, start_lon: float
+) -> list[tuple[float, float]]:
     print(f"[planner] Generating corridor: {CORRIDOR_LENGTH}m × {CORRIDOR_WIDTH}m")
     points = []
     num_lanes = int(CORRIDOR_WIDTH / LANE_SPACING) + 1
@@ -89,31 +94,36 @@ def generate_zigzag_path(start_lat: float, start_lon: float) -> list[tuple[float
 
 # ── Video server ────────────────────────────────────────────────────────
 
+
 class StreamingHandler(server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == '/':
+        if self.path == "/":
             self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
+            self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(b"<html><body style='background:black; color:cyan;'>")
             self.wfile.write(b"<h1>SCOUT - CORRIDOR SCAN</h1>")
-            self.wfile.write(b"<img src='stream.mjpg' style='width:100%;'/></body></html>")
+            self.wfile.write(
+                b"<img src='stream.mjpg' style='width:100%;'/></body></html>"
+            )
 
-        elif self.path == '/stream.mjpg':
+        elif self.path == "/stream.mjpg":
             self.send_response(200)
-            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
+            self.send_header(
+                "Content-Type", "multipart/x-mixed-replace; boundary=FRAME"
+            )
             self.end_headers()
             try:
                 while True:
                     with output.condition:
                         output.condition.wait()
                         frame = output.frame
-                    ret, jpeg = cv2.imencode('.jpg', frame)
-                    self.wfile.write(b'--FRAME\r\n')
-                    self.send_header('Content-Type', 'image/jpeg')
+                    ret, jpeg = cv2.imencode(".jpg", frame)
+                    self.wfile.write(b"--FRAME\r\n")
+                    self.send_header("Content-Type", "image/jpeg")
                     self.end_headers()
                     self.wfile.write(jpeg.tobytes())
-                    self.wfile.write(b'\r\n')
+                    self.wfile.write(b"\r\n")
             except Exception:
                 pass
 
@@ -124,12 +134,13 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
 
 
 def run_video_server(port: int = 8000):
-    server = StreamingServer(('', port), StreamingHandler)
+    server = StreamingServer(("", port), StreamingHandler)
     print(f"[video] Streaming on :{port}")
     server.serve_forever()
 
 
 # ── Mission ─────────────────────────────────────────────────────────────
+
 
 def run_mission():
     global waypoints, wp_index, mission_started
@@ -185,7 +196,9 @@ def run_mission():
                     wp_index += 1
                     if wp_index >= len(waypoints):
                         print("[nav] All waypoints complete — returning to launch")
-                        os.system('espeak "Scan complete. Returning to launch." 2>/dev/null &')
+                        os.system(
+                            'espeak "Scan complete. Returning to launch." 2>/dev/null &'
+                        )
                         ctrl.rtl()
                         break
             else:
@@ -200,24 +213,73 @@ def run_mission():
                     if d.class_name == "person":
                         x1, y1, x2, y2 = d.bbox
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                        cv2.putText(frame, f"{d.class_name} #{d.track_id}", (x1, y1 - 8),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                        cv2.putText(
+                            frame,
+                            f"{d.class_name} #{d.track_id}",
+                            (x1, y1 - 8),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 0, 255),
+                            2,
+                        )
 
-                cv2.putText(frame, f"WP: {wp_index}/{len(waypoints)}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                cv2.putText(frame, f"GPS: {s.lat:.5f}, {s.lon:.5f}", (10, 55),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                cv2.putText(frame, f"ALT: {s.alt_rel:.1f}m", (10, 80),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                cv2.putText(frame, f"BAT: {s.battery_voltage:.1f}V", (10, 105),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    f"WP: {wp_index}/{len(waypoints)}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2,
+                )
+                cv2.putText(
+                    frame,
+                    f"GPS: {s.lat:.5f}, {s.lon:.5f}",
+                    (10, 55),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2,
+                )
+                cv2.putText(
+                    frame,
+                    f"ALT: {s.alt_rel:.1f}m",
+                    (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2,
+                )
+                cv2.putText(
+                    frame,
+                    f"BAT: {s.battery_voltage:.1f}V",
+                    (10, 105),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2,
+                )
 
                 if wp_index < len(waypoints):
-                    cv2.putText(frame, "MISSION: ACTIVE", (10, 130),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    cv2.putText(
+                        frame,
+                        "MISSION: ACTIVE",
+                        (10, 130),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 255),
+                        2,
+                    )
                 else:
-                    cv2.putText(frame, "MISSION: COMPLETE — RTL", (10, 130),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                    cv2.putText(
+                        frame,
+                        "MISSION: COMPLETE — RTL",
+                        (10, 130),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 0, 255),
+                        2,
+                    )
 
                 output.write(frame)
             cap.release()
@@ -234,15 +296,26 @@ def run_mission():
 
 # ── Entry point ─────────────────────────────────────────────────────────
 
+
 def main():
     global detector, FLIGHT_ALTITUDE, CORRIDOR_LENGTH, CORRIDOR_WIDTH, LANE_SPACING, DETECTOR_CONF
 
     parser = argparse.ArgumentParser(description="Corridor scout mission")
-    parser.add_argument("--alt", type=float, default=FLIGHT_ALTITUDE, help="Flight altitude (m)")
-    parser.add_argument("--length", type=float, default=CORRIDOR_LENGTH, help="Corridor length (m)")
-    parser.add_argument("--width", type=float, default=CORRIDOR_WIDTH, help="Corridor width (m)")
-    parser.add_argument("--lane", type=float, default=LANE_SPACING, help="Lane spacing (m)")
-    parser.add_argument("--conf", type=float, default=DETECTOR_CONF, help="Detection confidence")
+    parser.add_argument(
+        "--alt", type=float, default=FLIGHT_ALTITUDE, help="Flight altitude (m)"
+    )
+    parser.add_argument(
+        "--length", type=float, default=CORRIDOR_LENGTH, help="Corridor length (m)"
+    )
+    parser.add_argument(
+        "--width", type=float, default=CORRIDOR_WIDTH, help="Corridor width (m)"
+    )
+    parser.add_argument(
+        "--lane", type=float, default=LANE_SPACING, help="Lane spacing (m)"
+    )
+    parser.add_argument(
+        "--conf", type=float, default=DETECTOR_CONF, help="Detection confidence"
+    )
     parser.add_argument("--no-vision", action="store_true", help="Skip YOLO detection")
     parser.add_argument("--port", type=int, default=8000, help="Video stream port")
     args = parser.parse_args()
@@ -273,7 +346,8 @@ def main():
     health_app = Flask(__name__)
     health_app.register_blueprint(health_bp)
     init_health(ctrl)
-    threading.Thread(target=health_app.run, kwargs={"host": "0.0.0.0", "port": 9090, "debug": False}, daemon=True).start()
+    h_kwargs = {"host": "0.0.0.0", "port": 9090, "debug": False}
+    threading.Thread(target=health_app.run, kwargs=h_kwargs, daemon=True).start()
 
     # Video server thread
     threading.Thread(target=run_video_server, args=(args.port,), daemon=True).start()

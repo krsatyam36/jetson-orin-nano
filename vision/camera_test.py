@@ -16,7 +16,7 @@ import time
 # Try to open the serial port
 # Note: It might be ttyACM0 or ttyACM1. Check ls /dev/ttyACM* if this fails.
 try:
-    ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+    ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
     print("Success: Serial port opened on /dev/ttyACM0")
 except Exception as e:
     print(f"Error opening serial port: {e}")
@@ -36,4 +36,3 @@ try:
 except KeyboardInterrupt:
     print("\nExiting...")
     ser.close()
-
